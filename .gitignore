@@ -24,3 +24,8 @@ target/
 
 .DS_Store
 
+# Spring Boot - Archivos de configuración con secretos
+
+Backend/src/main/resources/application.properties
+passwords.txt
+

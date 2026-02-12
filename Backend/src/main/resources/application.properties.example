@@ -1,12 +1,14 @@
 # ===========================================
 # CONFIGURACIÓN DEL SISTEMA PAPUS BARBERSHOP
 # ===========================================
+# Este es un archivo de ejemplo. Copia este archivo a application.properties
+# y configura las variables de entorno necesarias.
 
 # ==================== CONFIGURACIÓN DE BASE DE DATOS ====================
 # Configuración de conexión a PostgreSQL
 spring.datasource.url=jdbc:postgresql://localhost:5432/papus_barbershop
 spring.datasource.username=postgres
-spring.datasource.password=04012005
+spring.datasource.password=TU_CONTRASEÑA_AQUI
 spring.datasource.driver-class-name=org.postgresql.Driver
 
 # ==================== CONFIGURACIÓN JPA/HIBERNATE ====================
@@ -31,7 +33,7 @@ logging.level.org.hibernate.type.descriptor.sql.BasicBinder=TRACE
 
 # ==================== CONFIGURACIÓN JWT ====================
 # Clave secreta para firmar tokens JWT
-jwt.secret=PapusBarberShopSecretKey2024SecureKeyForJWTTokenGeneration
+jwt.secret=TU_CLAVE_SECRETA_JWT_AQUI
 # Tiempo de expiración del token en milisegundos (24 horas)
 jwt.expiration=86400000
 
@@ -61,8 +63,8 @@ spring.datasource.hikari.pool-name=PapusBarberShopPool
 # https://myaccount.google.com/apppasswords
 spring.mail.host=smtp.gmail.com
 spring.mail.port=587
-spring.mail.username=cristalesbryan35@gmail.com
-spring.mail.password=edegdltatlxavvsi
+spring.mail.username=TU_EMAIL_AQUI@gmail.com
+spring.mail.password=TU_CONTRASEÑA_DE_APLICACION_AQUI
 spring.mail.properties.mail.smtp.auth=true
 spring.mail.properties.mail.smtp.starttls.enable=true
 spring.mail.properties.mail.smtp.starttls.required=true
