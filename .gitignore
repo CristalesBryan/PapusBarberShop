@@ -1,0 +1,26 @@
+# Angular
+
+node_modules/
+
+dist/
+
+.angular/
+
+coverage/
+
+
+
+# Spring Boot
+
+target/
+
+*.log
+
+
+
+# Entorno
+
+.env
+
+.DS_Store
+
