@@ -1,6 +1,7 @@
 export const environment = {
   production: true,
-  apiUrl: 'http://localhost:8080',
+  // Usar el mismo dominio en producción (el backend sirve los frontends)
+  apiUrl: window.location.origin,
   appName: 'Papus BarberShop',
   version: '1.0.0',
   defaultPageSize: 10,
