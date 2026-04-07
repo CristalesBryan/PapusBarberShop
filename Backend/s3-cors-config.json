@@ -1,0 +1,14 @@
+[
+  {
+    "AllowedHeaders": ["*"],
+    "AllowedMethods": ["GET", "PUT", "HEAD"],
+    "AllowedOrigins": [
+      "https://gestion.papusbarbershop.com",
+      "https://www.papusbarbershop.com",
+      "https://papusbarbershop.com",
+      "http://localhost:4200",
+      "http://localhost:3000"
+    ],
+    "ExposeHeaders": ["ETag"]
+  }
+]

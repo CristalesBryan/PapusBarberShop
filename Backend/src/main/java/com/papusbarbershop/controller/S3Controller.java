@@ -2,6 +2,8 @@ package com.papusbarbershop.controller;
 
 import com.papusbarbershop.service.ProductoService;
 import com.papusbarbershop.service.S3Service;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -22,6 +24,8 @@ import java.util.Map;
 @CrossOrigin(origins = "*")
 public class S3Controller {
 
+    private static final Logger logger = LoggerFactory.getLogger(S3Controller.class);
+
     @Autowired
     private S3Service s3Service;
 
@@ -36,13 +40,19 @@ public class S3Controller {
      */
     @PostMapping("/presigned-url/upload")
     public ResponseEntity<?> generatePresignedUploadUrl(@RequestBody PresignedUploadRequest request) {
+        logger.info("Solicitud de URL presignada para subir archivo: fileName={}, folder={}, contentType={}", 
+                request.getFileName(), request.getFolder(), request.getContentType());
+        
         try {
             if (request.getFileName() == null || request.getFileName().isEmpty()) {
+                logger.warn("Solicitud rechazada: nombre de archivo vacío");
                 return ResponseEntity.badRequest().body(createErrorResponse("El nombre del archivo es requerido"));
             }
 
             String folder = request.getFolder() != null ? request.getFolder() : "general";
             String contentType = request.getContentType() != null ? request.getContentType() : "application/octet-stream";
+
+            logger.info("Generando URL presignada con parámetros: folder={}, contentType={}", folder, contentType);
 
             S3Service.PresignedUrlResponse response = s3Service.generatePresignedUploadUrl(
                     request.getFileName(),
@@ -54,8 +64,18 @@ public class S3Controller {
             result.put("url", response.getUrl());
             result.put("key", response.getKey());
 
+            logger.info("URL presignada generada exitosamente: key={}", response.getKey());
             return ResponseEntity.ok(result);
+        } catch (IllegalStateException e) {
+            logger.error("Error de configuración al generar URL presignada: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(createErrorResponse("Error de configuración de S3: " + e.getMessage()));
+        } catch (IllegalArgumentException e) {
+            logger.warn("Error de validación al generar URL presignada: {}", e.getMessage());
+            return ResponseEntity.badRequest()
+                    .body(createErrorResponse("Error de validación: " + e.getMessage()));
         } catch (Exception e) {
+            logger.error("Error inesperado al generar URL presignada", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(createErrorResponse("Error al generar URL presignada: " + e.getMessage()));
         }

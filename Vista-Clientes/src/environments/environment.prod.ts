@@ -1,7 +1,7 @@
 export const environment = {
   production: true,
   // Usar el mismo dominio en producción (el backend sirve los frontends)
-  apiUrl: window.location.origin,
+  apiUrl: 'https://backendpapusbarbershop-production.up.railway.app',
   appName: 'Papus BarberShop - Vista Para Clientes',
   version: '1.0.0',
   defaultPageSize: 10,
@@ -18,8 +18,8 @@ export const environment = {
 
   // Configuración de Amazon S3
   s3: {
-    region: 'us-east-1', // Cambiar según tu región de AWS
-    bucketName: 'papus-barbershop-images', // Cambiar por el nombre de tu bucket
+    region: 'us-east-2', // Región de AWS donde está el bucket
+    bucketName: 'papusbarbershop', // Nombre del bucket público
     // Las credenciales se obtendrán desde el backend por seguridad
     // No exponer Access Key ID y Secret Access Key en el frontend
   },

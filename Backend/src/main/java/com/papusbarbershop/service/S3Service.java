@@ -1,5 +1,7 @@
 package com.papusbarbershop.service;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
@@ -11,6 +13,7 @@ import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
 import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
 
+import jakarta.annotation.PostConstruct;
 import java.time.Duration;
 import java.util.UUID;
 
@@ -24,6 +27,8 @@ import java.util.UUID;
  */
 @Service
 public class S3Service {
+
+    private static final Logger logger = LoggerFactory.getLogger(S3Service.class);
 
     @Value("${aws.s3.region}")
     private String region;
@@ -41,17 +46,72 @@ public class S3Service {
     private long presignedUrlExpiration;
 
     /**
+     * Valida la configuración de S3 después de la inicialización.
+     * Se ejecuta automáticamente después de que Spring inyecta las dependencias.
+     */
+    @PostConstruct
+    public void validateConfiguration() {
+        logger.info("=== Validando configuración de S3 ===");
+        logger.info("Región: {}", region);
+        logger.info("Bucket: {}", bucketName);
+        logger.info("Access Key ID presente: {}", (accessKeyId != null && !accessKeyId.isEmpty()));
+        logger.info("Secret Access Key presente: {}", (secretAccessKey != null && !secretAccessKey.isEmpty()));
+        logger.info("Tiempo de expiración de URLs presignadas: {} segundos", presignedUrlExpiration);
+        
+        if (region == null || region.isEmpty()) {
+            logger.error("ERROR: AWS_REGION no está configurada");
+            throw new IllegalStateException("AWS_REGION no está configurada");
+        }
+        
+        if (bucketName == null || bucketName.isEmpty()) {
+            logger.error("ERROR: AWS_S3_BUCKET_NAME no está configurada");
+            throw new IllegalStateException("AWS_S3_BUCKET_NAME no está configurada");
+        }
+        
+        if (accessKeyId == null || accessKeyId.isEmpty()) {
+            logger.error("ERROR: AWS_ACCESS_KEY_ID no está configurada");
+            throw new IllegalStateException("AWS_ACCESS_KEY_ID no está configurada");
+        }
+        
+        if (secretAccessKey == null || secretAccessKey.isEmpty()) {
+            logger.error("ERROR: AWS_SECRET_ACCESS_KEY no está configurada");
+            throw new IllegalStateException("AWS_SECRET_ACCESS_KEY no está configurada");
+        }
+        
+        // Validar formato de región
+        try {
+            Region.of(region);
+            logger.info("Región válida: {}", region);
+        } catch (Exception e) {
+            logger.error("ERROR: Región inválida: {}", region, e);
+            throw new IllegalStateException("Región AWS inválida: " + region, e);
+        }
+        
+        logger.info("=== Configuración de S3 validada correctamente ===");
+    }
+
+    /**
      * Crea un cliente S3 configurado con las credenciales.
      * 
      * @return Cliente S3 configurado
      */
     private S3Client createS3Client() {
+        logger.debug("Creando cliente S3 con región: {}, bucket: {}", region, bucketName);
+        
+        if (accessKeyId == null || accessKeyId.isEmpty() || secretAccessKey == null || secretAccessKey.isEmpty()) {
+            logger.error("ERROR: Credenciales AWS no están disponibles");
+            throw new IllegalStateException("Credenciales AWS no están configuradas correctamente");
+        }
+        
         AwsBasicCredentials awsCredentials = AwsBasicCredentials.create(accessKeyId, secretAccessKey);
         
-        return S3Client.builder()
+        S3Client client = S3Client.builder()
                 .region(Region.of(region))
                 .credentialsProvider(StaticCredentialsProvider.create(awsCredentials))
                 .build();
+        
+        logger.debug("Cliente S3 creado exitosamente");
+        return client;
     }
 
     /**
@@ -60,12 +120,22 @@ public class S3Service {
      * @return Presigner S3 configurado
      */
     private S3Presigner createS3Presigner() {
+        logger.debug("Creando presigner S3 con región: {}, bucket: {}", region, bucketName);
+        
+        if (accessKeyId == null || accessKeyId.isEmpty() || secretAccessKey == null || secretAccessKey.isEmpty()) {
+            logger.error("ERROR: Credenciales AWS no están disponibles para presigner");
+            throw new IllegalStateException("Credenciales AWS no están configuradas correctamente");
+        }
+        
         AwsBasicCredentials awsCredentials = AwsBasicCredentials.create(accessKeyId, secretAccessKey);
         
-        return S3Presigner.builder()
+        S3Presigner presigner = S3Presigner.builder()
                 .region(Region.of(region))
                 .credentialsProvider(StaticCredentialsProvider.create(awsCredentials))
                 .build();
+        
+        logger.debug("Presigner S3 creado exitosamente");
+        return presigner;
     }
 
     /**
@@ -77,16 +147,44 @@ public class S3Service {
      * @return URL presignada y la key del objeto
      */
     public PresignedUrlResponse generatePresignedUploadUrl(String fileName, String folder, String contentType) {
+        logger.info("Generando URL presignada para subir archivo: fileName={}, folder={}, contentType={}", 
+                fileName, folder, contentType);
+        
+        // Validar parámetros
+        if (fileName == null || fileName.isEmpty()) {
+            throw new IllegalArgumentException("El nombre del archivo no puede estar vacío");
+        }
+        
+        if (contentType == null || contentType.isEmpty()) {
+            contentType = "application/octet-stream";
+            logger.warn("ContentType no proporcionado, usando por defecto: {}", contentType);
+        } else {
+            // Normalizar Content-Type: lowercase y trim para asegurar coincidencia exacta
+            contentType = contentType.toLowerCase().trim();
+            logger.debug("ContentType normalizado: {}", contentType);
+        }
+        
         // Generar un nombre único para el archivo
         String uniqueFileName = generateUniqueFileName(fileName);
         String key = folder + "/" + uniqueFileName;
+        
+        logger.info("Key generada: {}", key);
+        logger.info("Configuración: bucket={}, region={}, expiration={}s", 
+                bucketName, region, presignedUrlExpiration);
 
         try (S3Presigner presigner = createS3Presigner()) {
+            // Construir PutObjectRequest SIN Content-Type para evitar SignatureDoesNotMatch
+            // El Content-Type NO debe estar firmado en la URL presignada
+            // Solo se firma el header "host", permitiendo que el frontend envíe cualquier Content-Type
             PutObjectRequest putObjectRequest = PutObjectRequest.builder()
                     .bucket(bucketName)
                     .key(key)
-                    .contentType(contentType)
                     .build();
+            
+            // Nota: No incluimos Content-Type en el PutObjectRequest porque:
+            // 1. Si se incluye, queda firmado en SignedHeaders (content-type;host)
+            // 2. Esto causa SignatureDoesNotMatch si el Content-Type enviado no coincide exactamente
+            // 3. Al no incluirlo, solo se firma "host" y el frontend puede enviar cualquier Content-Type
 
             PutObjectPresignRequest presignRequest = PutObjectPresignRequest.builder()
                     .signatureDuration(Duration.ofSeconds(presignedUrlExpiration))
@@ -94,8 +192,16 @@ public class S3Service {
                     .build();
 
             String presignedUrl = presigner.presignPutObject(presignRequest).url().toString();
+            
+            logger.info("URL presignada generada exitosamente para key: {}", key);
+            logger.debug("URL presignada (primeros 100 caracteres): {}...", 
+                    presignedUrl.length() > 100 ? presignedUrl.substring(0, 100) : presignedUrl);
 
             return new PresignedUrlResponse(presignedUrl, key);
+        } catch (Exception e) {
+            logger.error("Error al generar URL presignada: bucket={}, region={}, key={}", 
+                    bucketName, region, key, e);
+            throw new RuntimeException("Error al generar URL presignada para S3: " + e.getMessage(), e);
         }
     }
 
@@ -107,6 +213,12 @@ public class S3Service {
      * @return URL presignada
      */
     public String generatePresignedDownloadUrl(String key, long expirationTime) {
+        logger.info("Generando URL presignada para descargar: key={}, expiration={}s", key, expirationTime);
+        
+        if (key == null || key.isEmpty()) {
+            throw new IllegalArgumentException("La key no puede estar vacía");
+        }
+        
         try (S3Presigner presigner = createS3Presigner()) {
             GetObjectRequest getObjectRequest = GetObjectRequest.builder()
                     .bucket(bucketName)
@@ -118,7 +230,14 @@ public class S3Service {
                     .getObjectRequest(getObjectRequest)
                     .build();
 
-            return presigner.presignGetObject(presignRequest).url().toString();
+            String presignedUrl = presigner.presignGetObject(presignRequest).url().toString();
+            logger.info("URL presignada de descarga generada exitosamente para key: {}", key);
+            
+            return presignedUrl;
+        } catch (Exception e) {
+            logger.error("Error al generar URL presignada de descarga: bucket={}, region={}, key={}", 
+                    bucketName, region, key, e);
+            throw new RuntimeException("Error al generar URL presignada de descarga: " + e.getMessage(), e);
         }
     }
 
@@ -129,6 +248,12 @@ public class S3Service {
      * @throws Exception Si hay un error al eliminar el archivo
      */
     public void deleteFile(String key) throws Exception {
+        logger.info("Eliminando archivo de S3: key={}, bucket={}", key, bucketName);
+        
+        if (key == null || key.isEmpty()) {
+            throw new IllegalArgumentException("La key no puede estar vacía");
+        }
+        
         try (S3Client s3Client = createS3Client()) {
             DeleteObjectRequest deleteRequest = DeleteObjectRequest.builder()
                     .bucket(bucketName)
@@ -136,6 +261,11 @@ public class S3Service {
                     .build();
 
             s3Client.deleteObject(deleteRequest);
+            logger.info("Archivo eliminado exitosamente: key={}", key);
+        } catch (Exception e) {
+            logger.error("Error al eliminar archivo de S3: bucket={}, region={}, key={}", 
+                    bucketName, region, key, e);
+            throw e;
         }
     }
 
@@ -146,6 +276,12 @@ public class S3Service {
      * @return true si el archivo existe
      */
     public boolean fileExists(String key) {
+        logger.debug("Verificando existencia de archivo: key={}, bucket={}", key, bucketName);
+        
+        if (key == null || key.isEmpty()) {
+            return false;
+        }
+        
         try (S3Client s3Client = createS3Client()) {
             HeadObjectRequest headRequest = HeadObjectRequest.builder()
                     .bucket(bucketName)
@@ -153,11 +289,14 @@ public class S3Service {
                     .build();
 
             s3Client.headObject(headRequest);
+            logger.debug("Archivo existe: key={}", key);
             return true;
         } catch (NoSuchKeyException e) {
+            logger.debug("Archivo no existe: key={}", key);
             return false;
         } catch (Exception e) {
-            // Log error si es necesario
+            logger.error("Error al verificar existencia de archivo: bucket={}, region={}, key={}", 
+                    bucketName, region, key, e);
             return false;
         }
     }

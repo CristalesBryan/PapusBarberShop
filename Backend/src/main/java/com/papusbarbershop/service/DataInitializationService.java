@@ -48,6 +48,7 @@ public class DataInitializationService implements CommandLineRunner {
         eliminarRestriccionUnicaCitas();
         initializeAdminUser();
         initializeBarberoUser();
+        initializeCesiaUser();
         desactivarHorariosPasados();
         logger.info("Inicialización de datos completada.");
     }
@@ -268,6 +269,38 @@ public class DataInitializationService implements CommandLineRunner {
                     System.out.println("✓ Contraseña del usuario barbero actualizada: " + barberoUsername + "/" + barberoPassword);
                 } else {
                     System.out.println("✓ Usuario barbero ya existe con contraseña correcta");
+                }
+            }
+        }
+    }
+
+    /**
+     * Inicializa el usuario Cesia por defecto.
+     * Rol CESIA: mismo acceso que barbero (Servicios, Ventas) más Gestión Catálogo y Compra Aquí.
+     * Si el usuario 'Cesia' no existe, lo crea con la contraseña 'Cesia123'.
+     */
+    private void initializeCesiaUser() {
+        String cesiaUsername = "Cesia";
+        String cesiaPassword = "Cesia123";
+
+        if (!usuarioRepository.existsByUsername(cesiaUsername)) {
+            Usuario cesia = new Usuario();
+            cesia.setUsername(cesiaUsername);
+            cesia.setPassword(passwordEncoder.encode(cesiaPassword));
+            cesia.setRol(Usuario.Rol.CESIA);
+            cesia.setActivo(true);
+            usuarioRepository.save(cesia);
+            System.out.println("✓ Usuario Cesia creado: " + cesiaUsername + "/" + cesiaPassword);
+        } else {
+            Usuario cesia = usuarioRepository.findByUsername(cesiaUsername).orElse(null);
+            if (cesia != null) {
+                boolean passwordCorrect = passwordEncoder.matches(cesiaPassword, cesia.getPassword());
+                if (!passwordCorrect) {
+                    cesia.setPassword(passwordEncoder.encode(cesiaPassword));
+                    usuarioRepository.save(cesia);
+                    System.out.println("✓ Contraseña del usuario Cesia actualizada: " + cesiaUsername + "/" + cesiaPassword);
+                } else {
+                    System.out.println("✓ Usuario Cesia ya existe con contraseña correcta");
                 }
             }
         }

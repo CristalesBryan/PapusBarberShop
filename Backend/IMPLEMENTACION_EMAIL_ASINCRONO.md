@@ -29,9 +29,14 @@ Se ha implementado un sistema completo de envío asíncrono de correos electrón
          │ submit() - NO bloquea
          ▼
 ┌─────────────────┐
-│  JavaMailSender  │  (Envía el correo)
+│  Resend (SDK)   │  (Resend API - Envía los correos)
 └─────────────────┘
 ```
+
+Al agendar una cita se envían automáticamente **3 correos** (en segundo plano):
+1. **Al cliente:** confirmación con datos de la cita (fecha, hora, barbero, tipo de corte).
+2. **Al barbero seleccionado:** notificación de nueva cita con datos del cliente.
+3. **Al admin de la barbería:** notificación general de nueva cita (configurar `resend.admin.email`).
 
 ---
 
@@ -62,7 +67,7 @@ Se ha implementado un sistema completo de envío asíncrono de correos electrón
 - Maneja errores sin propagarlos al hilo principal
 
 **Métodos principales:**
-- `enviarConfirmacionCitaAsync()` - Envía correo de confirmación de cita
+- `enviarConfirmacionCitaAsync()` - Envía los 3 correos (cliente, barbero, admin)
 - `enviarCorreoAsync()` - Método genérico para enviar cualquier correo
 
 ---
@@ -187,9 +192,14 @@ public class CitaController {
 
 ## 🔧 Configuración
 
-No se requiere configuración adicional. El sistema usa:
+El sistema usa **Resend** para el envío de correos. Configuración en `application.properties` o variables de entorno:
+- `RESEND_API_KEY` - API Key de Resend (https://resend.com/api-keys)
+- `RESEND_FROM_EMAIL` - Remitente (ej: `Citas Papus BarberShop <citas@papusbarbershop.com>`)
+- `RESEND_ADMIN_EMAIL` - Email del admin para notificaciones de nuevas citas (opcional)
+
+El sistema usa:
 - `ExecutorService` con pool fijo de 5 hilos
-- `JavaMailSender` configurado en `application.properties`
+- SDK Resend (resend-java) para enviar los correos
 - Logging automático de todas las operaciones
 
 ---
@@ -209,7 +219,7 @@ No se requiere configuración adicional. El sistema usa:
    ↓
 6. (En segundo plano) Hilo del pool ejecuta el envío
    ↓
-7. JavaMailSender envía el correo
+7. Resend envía los 3 correos (cliente, barbero, admin)
    ↓
 8. Logs registran el resultado
 ```

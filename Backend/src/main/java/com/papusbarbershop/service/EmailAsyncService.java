@@ -1,216 +1,253 @@
 package com.papusbarbershop.service;
 
+import com.resend.Resend;
+import com.resend.core.exception.ResendException;
+import com.resend.services.emails.model.CreateEmailOptions;
+import com.resend.services.emails.model.CreateEmailResponse;
+import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.mail.SimpleMailMessage;
-import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
 
 /**
- * Servicio asíncrono para el envío de correos electrónicos.
- * 
- * Este servicio desacopla el envío de correos del flujo principal de la aplicación,
- * ejecutando las operaciones de envío en segundo plano mediante un ExecutorService.
- * 
- * ARQUITECTURA:
- * - EmailAsyncService: Coordina el envío asíncrono
- * - EmailExecutor: Gestiona el pool de hilos (ExecutorService)
- * - JavaMailSender: Realiza el envío real del correo
- * 
- * VENTAJAS:
- * - No bloquea las respuestas del servidor
- * - Las excepciones se manejan dentro del hilo asíncrono
- * - Escalable: puede manejar múltiples envíos simultáneos
+ * Servicio asíncrono para el envío de correos electrónicos usando Resend.
+ *
+ * Al agendar una cita se envían automáticamente 3 correos:
+ * - Al cliente: confirmación con datos de la cita (fecha, hora, barbero, tipo de corte).
+ * - Al barbero seleccionado: notificación de nueva cita con datos del cliente.
+ * - Al admin de la barbería: notificación general de nueva cita.
  */
 @Service
 public class EmailAsyncService {
 
     private static final Logger logger = LoggerFactory.getLogger(EmailAsyncService.class);
 
-    @Autowired(required = false)
-    private JavaMailSender mailSender;
-
     @Autowired
     private EmailExecutor emailExecutor;
 
-    @Value("${spring.mail.username:}")
+    @Value("${resend.api-key:}")
+    private String resendApiKey;
+
+    @Value("${resend.from.email:Citas Papus BarberShop <citas@papusbarbershop.com>}")
     private String emailFrom;
 
-    /**
-     * Envía un correo de confirmación de cita de forma ASÍNCRONA.
-     * 
-     * Este método NO bloquea la ejecución. El correo se envía en segundo plano
-     * y cualquier error se registra sin afectar la respuesta al usuario.
-     * 
-     * @param correos Lista de correos destinatarios
-     * @param nombreCliente Nombre del cliente
-     * @param fecha Fecha de la cita
-     * @param hora Hora de la cita
-     * @param barberoNombre Nombre del barbero
-     * @param tipoCorteNombre Nombre del tipo de corte
-     * @param comentarios Comentarios adicionales
-     */
-    public void enviarConfirmacionCitaAsync(List<String> correos, String nombreCliente, 
-                                           String fecha, String hora, String barberoNombre,
-                                           String tipoCorteNombre, String comentarios) {
-        
-        // Validar que hay correos para enviar
-        if (correos == null || correos.isEmpty()) {
-            logger.warn("No se proporcionaron correos para enviar la confirmación (asíncrono)");
-            return;
+    @Value("${resend.admin.email:}")
+    private String adminEmail;
+
+    private Resend resend;
+
+    @PostConstruct
+    public void init() {
+        logger.info("=== Validando configuración de Resend ===");
+        if (resendApiKey == null || resendApiKey.isBlank()) {
+            logger.warn("⚠️  RESEND_API_KEY no está configurada. Los correos NO se enviarán.");
+            logger.warn("⚠️  Configura resend.api-key o la variable de entorno RESEND_API_KEY.");
+            resend = null;
+        } else {
+            resend = new Resend(resendApiKey);
+            logger.info("✓ Resend configurado correctamente");
+            logger.info("✓ Email remitente: {}", emailFrom);
+            if (adminEmail == null || adminEmail.isBlank()) {
+                logger.info("  (RESEND_ADMIN_EMAIL no configurado: no se enviará notificación al admin)");
+            } else {
+                logger.info("✓ Email admin para notificaciones: {}", adminEmail);
+            }
         }
-
-        // Filtrar correos vacíos o inválidos
-        List<String> correosValidos = correos.stream()
-                .filter(c -> c != null && !c.trim().isEmpty())
-                .toList();
-
-        if (correosValidos.isEmpty()) {
-            logger.warn("No hay correos válidos para enviar la confirmación (asíncrono)");
-            return;
-        }
-
-        // Ejecutar el envío de forma asíncrona
-        emailExecutor.ejecutarEnvioAsincrono(() -> {
-            enviarCorreoConfirmacion(correosValidos, nombreCliente, fecha, hora, 
-                                   barberoNombre, tipoCorteNombre, comentarios);
-        });
-        
-        logger.info("Tarea de envío de correo de confirmación enviada al pool asíncrono. " +
-                   "Destinatarios: {}. El correo se enviará en segundo plano.", correosValidos);
+        logger.info("=== Validación de Resend completada ===");
     }
 
     /**
-     * Método genérico para enviar un correo de forma asíncrona.
-     * 
-     * @param destinatario Correo del destinatario
-     * @param asunto Asunto del correo
-     * @param mensaje Cuerpo del mensaje
+     * Envía los 3 correos de cita de forma ASÍNCRONA: al cliente, al barbero y al admin.
+     *
+     * @param correosCliente     Lista de correos del cliente (confirmación)
+     * @param nombreCliente      Nombre del cliente
+     * @param correoCliente      Correo principal del cliente (para datos en correo al barbero/admin)
+     * @param telefonoCliente    Teléfono del cliente (opcional)
+     * @param fecha              Fecha de la cita (formateada)
+     * @param hora               Hora de la cita (formateada)
+     * @param barberoNombre      Nombre del barbero
+     * @param barberoCorreo      Correo del barbero (para notificación; puede ser null/vacío)
+     * @param tipoCorteNombre    Nombre del tipo de corte
+     * @param comentarios        Comentarios adicionales
+     */
+    public void enviarConfirmacionCitaAsync(List<String> correosCliente, String nombreCliente,
+                                            String correoCliente, String telefonoCliente,
+                                            String fecha, String hora, String barberoNombre,
+                                            String barberoCorreo, String tipoCorteNombre,
+                                            String comentarios) {
+        emailExecutor.ejecutarEnvioAsincrono(() -> {
+            enviarCorreosCita(correosCliente, nombreCliente, correoCliente, telefonoCliente,
+                    fecha, hora, barberoNombre, barberoCorreo, tipoCorteNombre, comentarios);
+        });
+        logger.info("Tarea de envío de correos de cita enviada al pool asíncrono (cliente, barbero, admin).");
+    }
+
+    /**
+     * Envía un correo genérico de forma asíncrona.
      */
     public void enviarCorreoAsync(String destinatario, String asunto, String mensaje) {
         if (destinatario == null || destinatario.trim().isEmpty()) {
             logger.warn("No se proporcionó destinatario para el correo");
             return;
         }
-
-        emailExecutor.ejecutarEnvioAsincrono(() -> {
-            enviarCorreoSimple(destinatario, asunto, mensaje);
-        });
-        
-        logger.info("Tarea de envío de correo genérico enviada al pool asíncrono. " +
-                   "Destinatario: {}. El correo se enviará en segundo plano.", destinatario);
+        emailExecutor.ejecutarEnvioAsincrono(() -> enviarCorreoSimple(destinatario, asunto, mensaje));
+        logger.info("Tarea de envío de correo genérico enviada al pool asíncrono. Destinatario: {}", destinatario);
     }
 
-    /**
-     * Método privado que realiza el envío real del correo de confirmación.
-     * Este método se ejecuta dentro del hilo asíncrono.
-     */
-    private void enviarCorreoConfirmacion(List<String> correos, String nombreCliente, 
-                                         String fecha, String hora, String barberoNombre,
-                                         String tipoCorteNombre, String comentarios) {
-        
-        if (mailSender == null) {
-            logger.warn("JavaMailSender no está configurado. No se enviará el correo.");
-            logger.info("Correo que se habría enviado a: {}", correos);
+    private void enviarCorreosCita(List<String> correosCliente, String nombreCliente,
+                                   String correoCliente, String telefonoCliente,
+                                   String fecha, String hora, String barberoNombre,
+                                   String barberoCorreo, String tipoCorteNombre,
+                                   String comentarios) {
+        if (resend == null) {
+            logger.warn("Resend no está configurado. No se enviarán correos.");
             return;
         }
 
+        List<String> correosValidos = correosCliente != null
+                ? correosCliente.stream().filter(c -> c != null && !c.trim().isEmpty()).toList()
+                : List.of();
+
         try {
-            String asunto = "Confirmación de Cita - Papus BarberShop";
-            String cuerpo = construirCuerpoEmail(nombreCliente, fecha, hora, barberoNombre, 
-                                                tipoCorteNombre, comentarios);
+            int enviados = 0;
 
-            String correoRemitente = (emailFrom != null && !emailFrom.isEmpty()) 
-                    ? emailFrom 
-                    : "noreply@papusbarbershop.com";
-
-            logger.info("Iniciando envío asíncrono de correos de confirmación. Remitente: {}, Destinatarios: {}", 
-                    correoRemitente, correos);
-
-            int correosEnviadosExitosamente = 0;
-            for (String correo : correos) {
-                try {
-                    SimpleMailMessage mensaje = new SimpleMailMessage();
-                    mensaje.setTo(correo.trim());
-                    mensaje.setSubject(asunto);
-                    mensaje.setText(cuerpo);
-                    mensaje.setFrom(correoRemitente);
-
-                    mailSender.send(mensaje);
-                    correosEnviadosExitosamente++;
-                    logger.info("✓ Correo de confirmación enviado exitosamente a: {} (asíncrono)", correo);
-                } catch (Exception e) {
-                    logger.error("✗ Error al enviar correo a {} (asíncrono): {}", correo, e.getMessage(), e);
-                    // Continuar con los demás correos aunque uno falle
+            // 1. Correo al/los cliente(s): confirmación con datos de la cita
+            String htmlCliente = construirCuerpoEmailHtmlCliente(nombreCliente, fecha, hora, barberoNombre, tipoCorteNombre, comentarios);
+            String asuntoCliente = "Confirmación de Cita - Papus BarberShop";
+            for (String to : correosValidos) {
+                if (enviarEmail(to, asuntoCliente, htmlCliente)) {
+                    enviados++;
                 }
             }
-            
-            logger.info("Proceso de envío asíncrono de correos completado. Total enviados: {}/{}", 
-                    correosEnviadosExitosamente, correos.size());
+
+            // 2. Correo al barbero: notificación de nueva cita con datos del cliente
+            if (barberoCorreo != null && !barberoCorreo.trim().isEmpty()) {
+                String htmlBarbero = construirCuerpoEmailHtmlBarbero(nombreCliente, correoCliente, telefonoCliente, fecha, hora, tipoCorteNombre, comentarios);
+                if (enviarEmail(barberoCorreo.trim(), "Nueva cita asignada - Papus BarberShop", htmlBarbero)) {
+                    enviados++;
+                }
+            }
+
+            // 3. Correo al admin: notificación general de nueva cita
+            if (adminEmail != null && !adminEmail.trim().isEmpty()) {
+                String htmlAdmin = construirCuerpoEmailHtmlAdmin(nombreCliente, correoCliente, telefonoCliente, fecha, hora, barberoNombre, tipoCorteNombre, comentarios);
+                if (enviarEmail(adminEmail.trim(), "Nueva cita registrada - Papus BarberShop", htmlAdmin)) {
+                    enviados++;
+                }
+            }
+
+            logger.info("Envío de correos de cita completado. Total enviados: {}", enviados);
         } catch (Exception e) {
-            logger.error("Error crítico en envío asíncrono de correos de confirmación: {}", e.getMessage(), e);
-            // No propagar la excepción - ya está dentro del hilo asíncrono
+            logger.error("Error en envío asíncrono de correos de cita: {}", e.getMessage(), e);
         }
     }
 
-    /**
-     * Método privado que realiza el envío real de un correo simple.
-     * Este método se ejecuta dentro del hilo asíncrono.
-     */
+    private boolean enviarEmail(String to, String subject, String html) {
+        try {
+            CreateEmailOptions params = CreateEmailOptions.builder()
+                    .from(emailFrom)
+                    .to(to)
+                    .subject(subject)
+                    .html(html)
+                    .build();
+            CreateEmailResponse response = resend.emails().send(params);
+            logger.info("✓ Correo enviado a {} (id: {})", to, response.getId());
+            return true;
+        } catch (ResendException e) {
+            logger.error("✗ Error al enviar correo a {}: {}", to, e.getMessage(), e);
+            return false;
+        }
+    }
+
     private void enviarCorreoSimple(String destinatario, String asunto, String mensaje) {
-        if (mailSender == null) {
-            logger.warn("JavaMailSender no está configurado. No se enviará el correo.");
+        if (resend == null) {
+            logger.warn("Resend no está configurado. No se enviará el correo.");
             return;
         }
-
-        try {
-            String correoRemitente = (emailFrom != null && !emailFrom.isEmpty()) 
-                    ? emailFrom 
-                    : "noreply@papusbarbershop.com";
-
-            SimpleMailMessage mailMessage = new SimpleMailMessage();
-            mailMessage.setTo(destinatario.trim());
-            mailMessage.setSubject(asunto);
-            mailMessage.setText(mensaje);
-            mailMessage.setFrom(correoRemitente);
-
-            mailSender.send(mailMessage);
-            logger.info("✓ Correo enviado exitosamente a: {} (asíncrono)", destinatario);
-        } catch (Exception e) {
-            logger.error("✗ Error al enviar correo a {} (asíncrono): {}", destinatario, e.getMessage(), e);
-            // No propagar la excepción - ya está dentro del hilo asíncrono
-        }
+        String html = "<html><body style=\"font-family: Arial, sans-serif;\"><p>" + escapeHtml(mensaje) + "</p></body></html>";
+        enviarEmail(destinatario.trim(), asunto, html);
     }
 
-    /**
-     * Construye el cuerpo del correo electrónico de confirmación.
-     */
-    private String construirCuerpoEmail(String nombreCliente, String fecha, String hora,
-                                       String barberoNombre, String tipoCorteNombre, 
-                                       String comentarios) {
-        StringBuilder cuerpo = new StringBuilder();
-        cuerpo.append("¡Hola ").append(nombreCliente).append("! 👋\n\n");
-        cuerpo.append("✨ Su cita ha sido confirmada exitosamente ✨\n\n");
-        cuerpo.append("📋 Detalles de la cita:\n");
-        cuerpo.append("📅 Fecha: ").append(fecha).append("\n");
-        cuerpo.append("🕐 Hora: ").append(hora).append("\n");
-        cuerpo.append("💇 Barbero: ").append(barberoNombre).append("\n");
-        cuerpo.append("✂️ Tipo de Corte: ").append(tipoCorteNombre).append("\n");
-        
+    private String construirCuerpoEmailHtmlCliente(String nombreCliente, String fecha, String hora,
+                                                   String barberoNombre, String tipoCorteNombre,
+                                                   String comentarios) {
+        StringBuilder html = new StringBuilder();
+        html.append("<!DOCTYPE html><html><head><meta charset=\"UTF-8\"></head><body style=\"font-family: Arial, sans-serif; line-height: 1.6; color: #333;\">");
+        html.append("<div style=\"max-width: 600px; margin: 0 auto; padding: 20px;\">");
+        html.append("<h2 style=\"color: #2c3e50;\">¡Hola ").append(escapeHtml(nombreCliente)).append("! 👋</h2>");
+        html.append("<p style=\"font-size: 18px; color: #27ae60;\">✨ Su cita ha sido confirmada exitosamente ✨</p>");
+        html.append("<div style=\"background-color: #f8f9fa; padding: 20px; border-radius: 5px; margin: 20px 0;\">");
+        html.append("<h3 style=\"color: #2c3e50; margin-top: 0;\">📋 Detalles de la cita:</h3>");
+        html.append("<p><strong>📅 Fecha:</strong> ").append(escapeHtml(fecha)).append("</p>");
+        html.append("<p><strong>🕐 Hora:</strong> ").append(escapeHtml(hora)).append("</p>");
+        html.append("<p><strong>💇 Barbero:</strong> ").append(escapeHtml(barberoNombre)).append("</p>");
+        html.append("<p><strong>✂️ Tipo de Corte:</strong> ").append(escapeHtml(tipoCorteNombre)).append("</p>");
         if (comentarios != null && !comentarios.trim().isEmpty()) {
-            cuerpo.append("💬 Comentarios: ").append(comentarios).append("\n");
+            html.append("<p><strong>💬 Comentarios:</strong> ").append(escapeHtml(comentarios)).append("</p>");
         }
-        
-        cuerpo.append("\n");
-        cuerpo.append("🎯 Esperamos verle pronto en Papus BarberShop 🎯\n\n");
-        cuerpo.append("Saludos cordiales,\n");
-        cuerpo.append("Equipo Papus BarberShop 💈");
-        
-        return cuerpo.toString();
+        html.append("</div>");
+        html.append("<p style=\"font-size: 16px; color: #2c3e50;\">🎯 Esperamos verle pronto en Papus BarberShop 🎯</p>");
+        html.append("<p>Saludos cordiales,<br>Equipo Papus BarberShop 💈</p>");
+        html.append("</div></body></html>");
+        return html.toString();
+    }
+
+    private String construirCuerpoEmailHtmlBarbero(String nombreCliente, String correoCliente, String telefonoCliente,
+                                                  String fecha, String hora, String tipoCorteNombre, String comentarios) {
+        StringBuilder html = new StringBuilder();
+        html.append("<!DOCTYPE html><html><head><meta charset=\"UTF-8\"></head><body style=\"font-family: Arial, sans-serif; line-height: 1.6; color: #333;\">");
+        html.append("<div style=\"max-width: 600px; margin: 0 auto; padding: 20px;\">");
+        html.append("<h2 style=\"color: #2c3e50;\">Nueva cita asignada</h2>");
+        html.append("<p>Se ha registrado una nueva cita con los siguientes datos del cliente:</p>");
+        html.append("<div style=\"background-color: #f8f9fa; padding: 20px; border-radius: 5px; margin: 20px 0;\">");
+        html.append("<p><strong>Nombre:</strong> ").append(escapeHtml(nombreCliente)).append("</p>");
+        html.append("<p><strong>Correo:</strong> ").append(escapeHtml(correoCliente != null ? correoCliente : "-")).append("</p>");
+        html.append("<p><strong>Teléfono:</strong> ").append(escapeHtml(telefonoCliente != null ? telefonoCliente : "-")).append("</p>");
+        html.append("<p><strong>Fecha:</strong> ").append(escapeHtml(fecha)).append("</p>");
+        html.append("<p><strong>Hora:</strong> ").append(escapeHtml(hora)).append("</p>");
+        html.append("<p><strong>Servicio:</strong> ").append(escapeHtml(tipoCorteNombre)).append("</p>");
+        if (comentarios != null && !comentarios.trim().isEmpty()) {
+            html.append("<p><strong>Comentarios:</strong> ").append(escapeHtml(comentarios)).append("</p>");
+        }
+        html.append("</div>");
+        html.append("<p>Saludos,<br>Papus BarberShop</p>");
+        html.append("</div></body></html>");
+        return html.toString();
+    }
+
+    private String construirCuerpoEmailHtmlAdmin(String nombreCliente, String correoCliente, String telefonoCliente,
+                                                String fecha, String hora, String barberoNombre, String tipoCorteNombre, String comentarios) {
+        StringBuilder html = new StringBuilder();
+        html.append("<!DOCTYPE html><html><head><meta charset=\"UTF-8\"></head><body style=\"font-family: Arial, sans-serif; line-height: 1.6; color: #333;\">");
+        html.append("<div style=\"max-width: 600px; margin: 0 auto; padding: 20px;\">");
+        html.append("<h2 style=\"color: #2c3e50;\">Nueva cita registrada en el sistema</h2>");
+        html.append("<p>Se ha agendado una nueva cita con los siguientes datos:</p>");
+        html.append("<div style=\"background-color: #f8f9fa; padding: 20px; border-radius: 5px; margin: 20px 0;\">");
+        html.append("<p><strong>Cliente:</strong> ").append(escapeHtml(nombreCliente)).append("</p>");
+        html.append("<p><strong>Correo cliente:</strong> ").append(escapeHtml(correoCliente != null ? correoCliente : "-")).append("</p>");
+        html.append("<p><strong>Teléfono:</strong> ").append(escapeHtml(telefonoCliente != null ? telefonoCliente : "-")).append("</p>");
+        html.append("<p><strong>Fecha:</strong> ").append(escapeHtml(fecha)).append(" | <strong>Hora:</strong> ").append(escapeHtml(hora)).append("</p>");
+        html.append("<p><strong>Barbero:</strong> ").append(escapeHtml(barberoNombre)).append("</p>");
+        html.append("<p><strong>Servicio:</strong> ").append(escapeHtml(tipoCorteNombre)).append("</p>");
+        if (comentarios != null && !comentarios.trim().isEmpty()) {
+            html.append("<p><strong>Comentarios:</strong> ").append(escapeHtml(comentarios)).append("</p>");
+        }
+        html.append("</div>");
+        html.append("<p>Saludos,<br>Papus BarberShop</p>");
+        html.append("</div></body></html>");
+        return html.toString();
+    }
+
+    private String escapeHtml(String text) {
+        if (text == null) return "";
+        return text.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;")
+                .replace("'", "&#39;");
     }
 }
-

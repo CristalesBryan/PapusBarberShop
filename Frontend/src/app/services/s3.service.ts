@@ -1,10 +1,8 @@
 import { Injectable } from '@angular/core';
-import { HttpClient, HttpHeaders } from '@angular/common/http';
-import { Observable, from } from 'rxjs';
-import { map, switchMap } from 'rxjs/operators';
+import { HttpClient } from '@angular/common/http';
+import { Observable, from, throwError } from 'rxjs';
+import { map, switchMap, catchError } from 'rxjs/operators';
 import { environment } from '../../environments/environment';
-import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 export interface PresignedUrlResponse {
   url: string;
@@ -36,12 +34,17 @@ export class S3Service {
    * @returns Observable con la URL presignada y la key del objeto
    */
   getPresignedUploadUrl(fileName: string, folder: string = 'general', contentType: string = 'image/jpeg'): Observable<PresignedUrlResponse> {
+    // Normalizar Content-Type antes de enviarlo al backend
+    const normalizedContentType = contentType.toLowerCase().trim();
+    
     const endpoint = `${this.apiUrl}/api/s3/presigned-url/upload`;
     const body = {
       fileName,
       folder,
-      contentType
+      contentType: normalizedContentType
     };
+    
+    console.log(`[S3Service] Solicitando URL presignada con Content-Type: ${normalizedContentType}`);
 
     return this.http.post<PresignedUrlResponse>(endpoint, body);
   }
@@ -73,11 +76,36 @@ export class S3Service {
    */
   uploadFile(file: File, folder: string = 'general', customFileName?: string): Observable<UploadResponse> {
     const fileName = customFileName || this.generateFileName(file.name);
-    const contentType = file.type || 'application/octet-stream';
+    // Normalizar Content-Type: lowercase, sin espacios, con fallback
+    let contentType = (file.type || 'application/octet-stream').toLowerCase().trim();
+    
+    // Si el tipo está vacío después de normalizar, usar el fallback
+    if (!contentType || contentType === '') {
+      contentType = 'application/octet-stream';
+    }
+    
+    // Detectar tipo de imagen basado en extensión si file.type está vacío
+    if (contentType === 'application/octet-stream') {
+      const extension = file.name.toLowerCase().split('.').pop();
+      const imageTypes: { [key: string]: string } = {
+        'jpg': 'image/jpeg',
+        'jpeg': 'image/jpeg',
+        'png': 'image/png',
+        'gif': 'image/gif',
+        'webp': 'image/webp',
+        'svg': 'image/svg+xml'
+      };
+      if (extension && imageTypes[extension]) {
+        contentType = imageTypes[extension];
+      }
+    }
+
+    console.log(`[S3Service] Subiendo archivo: ${fileName}, Content-Type: ${contentType}`);
 
     return this.getPresignedUploadUrl(fileName, folder, contentType).pipe(
       switchMap((presignedData: PresignedUrlResponse) => {
-        return this.uploadToS3(file, presignedData.url, contentType).pipe(
+        console.log(`[S3Service] URL presignada obtenida, subiendo con PUT sin headers extra`);
+        return this.uploadToS3(file, presignedData.url).pipe(
           map(() => ({
             key: presignedData.key,
             url: this.getPublicUrl(presignedData.key),
@@ -90,44 +118,41 @@ export class S3Service {
   }
 
   /**
-   * Sube un archivo directamente a S3 usando la URL presignada
-   * @param file Archivo a subir
-   * @param presignedUrl URL presignada obtenida del backend
-   * @param contentType Tipo de contenido del archivo
-   * @returns Observable que se completa cuando la subida termina
+   * Sube un archivo directamente a S3 usando la URL presignada.
+   *
+   * Usa fetch() en lugar de HttpClient para no enviar ningún header extra:
+   * la URL presignada solo firma el header "host". Cualquier header adicional
+   * (p. ej. Content-Type que Angular añade con File) provoca preflight CORS
+   * o SignatureDoesNotMatch.
+   *
+   * - Método: PUT
+   * - Body: contenido del archivo como ArrayBuffer (sin Content-Type)
+   * - Headers: ninguno personalizado
    */
-  private uploadToS3(file: File, presignedUrl: string, contentType: string): Observable<void> {
-    return new Observable(observer => {
-      const xhr = new XMLHttpRequest();
-
-      xhr.upload.addEventListener('progress', (event) => {
-        if (event.lengthComputable) {
-          const percentComplete = (event.loaded / event.total) * 100;
-          // Puedes emitir el progreso si lo necesitas
+  private uploadToS3(file: File, presignedUrl: string): Observable<void> {
+    return from(
+      (async () => {
+        const arrayBuffer = await file.arrayBuffer();
+        const response = await fetch(presignedUrl, {
+          method: 'PUT',
+          body: arrayBuffer,
+          mode: 'cors'
+        });
+        if (!response.ok) {
+          const text = await response.text();
+          throw new Error(`S3 upload failed: ${response.status} ${response.statusText}${text ? ' - ' + text : ''}`);
         }
-      });
-
-      xhr.addEventListener('load', () => {
-        if (xhr.status === 200 || xhr.status === 204) {
-          observer.next();
-          observer.complete();
-        } else {
-          observer.error(new Error(`Error al subir archivo: ${xhr.statusText}`));
-        }
-      });
-
-      xhr.addEventListener('error', () => {
-        observer.error(new Error('Error de red al subir archivo'));
-      });
-
-      xhr.addEventListener('abort', () => {
-        observer.error(new Error('Subida de archivo cancelada'));
-      });
-
-      xhr.open('PUT', presignedUrl);
-      xhr.setRequestHeader('Content-Type', contentType);
-      xhr.send(file);
-    });
+      })()
+    ).pipe(
+      map(() => {
+        console.log('[S3Service] Archivo subido exitosamente');
+        return;
+      }),
+      catchError(error => {
+        console.error('[S3Service] Error al subir archivo a S3:', error);
+        return throwError(() => error instanceof Error ? error : new Error(String(error)));
+      })
+    );
   }
 
   /**

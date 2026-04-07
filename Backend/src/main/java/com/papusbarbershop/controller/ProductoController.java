@@ -31,7 +31,7 @@ public class ProductoController {
      * @return Producto creado
      */
     @PostMapping
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'CESIA')")
     public ResponseEntity<ProductoDTO> createProducto(@Valid @RequestBody ProductoCreateDTO productoCreateDTO) {
         ProductoDTO producto = productoService.create(productoCreateDTO);
         return ResponseEntity.status(HttpStatus.CREATED).body(producto);
@@ -46,7 +46,7 @@ public class ProductoController {
      * @return Producto actualizado
      */
     @PutMapping("/{id}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'CESIA')")
     public ResponseEntity<ProductoDTO> updateProducto(
             @PathVariable Long id,
             @Valid @RequestBody ProductoCreateDTO productoCreateDTO) {
@@ -85,7 +85,7 @@ public class ProductoController {
      * @return Respuesta sin contenido
      */
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'CESIA')")
     public ResponseEntity<Void> deleteProducto(@PathVariable Long id) {
         productoService.delete(id);
         return ResponseEntity.noContent().build();

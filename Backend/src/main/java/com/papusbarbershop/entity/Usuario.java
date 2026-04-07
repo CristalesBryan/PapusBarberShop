@@ -40,7 +40,8 @@ public class Usuario {
      */
     public enum Rol {
         ADMIN,
-        BARBERO
+        BARBERO,
+        CESIA
     }
 
     // ==================== CONSTRUCTORES ====================

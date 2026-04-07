@@ -62,19 +62,14 @@ public class ReporteService {
         resumen.setCantidadVentas(ventas.size());
 
         // Calcular total de comisiones
-        // Comisión = comision del producto * cantidad vendida
+        // Comisión = comision del producto * cantidad vendida (0 si el producto fue eliminado)
         BigDecimal totalComisiones = ventas.stream()
                 .map(venta -> {
-                    Integer comision = venta.getProducto().getComision();
-                    if (comision == null) {
-                        comision = 0;
+                    Integer comision = 0;
+                    if (venta.getProducto() != null) {
+                        comision = venta.getProducto().getComision();
+                        if (comision == null) comision = 0;
                     }
-                    // Debug: verificar comisión del producto
-                    System.out.println("DEBUG Diario - Venta ID: " + venta.getId() + 
-                            ", Producto: " + venta.getProducto().getNombre() + 
-                            ", Comisión: " + comision + 
-                            ", Cantidad: " + venta.getCantidad());
-                    // Comisión = comision del producto * cantidad vendida
                     return BigDecimal.valueOf(comision).multiply(BigDecimal.valueOf(venta.getCantidad()));
                 })
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -120,19 +115,14 @@ public class ReporteService {
         resumen.setCantidadVentas(ventas.size());
 
         // Calcular total de comisiones
-        // Comisión = comision del producto * cantidad vendida
+        // Comisión = comision del producto * cantidad vendida (0 si el producto fue eliminado)
         BigDecimal totalComisiones = ventas.stream()
                 .map(venta -> {
-                    Integer comision = venta.getProducto().getComision();
-                    if (comision == null) {
-                        comision = 0;
+                    Integer comision = 0;
+                    if (venta.getProducto() != null) {
+                        comision = venta.getProducto().getComision();
+                        if (comision == null) comision = 0;
                     }
-                    // Debug: verificar comisión del producto
-                    System.out.println("DEBUG Mensual - Venta ID: " + venta.getId() + 
-                            ", Producto: " + venta.getProducto().getNombre() + 
-                            ", Comisión: " + comision + 
-                            ", Cantidad: " + venta.getCantidad());
-                    // Comisión = comision del producto * cantidad vendida
                     return BigDecimal.valueOf(comision).multiply(BigDecimal.valueOf(venta.getCantidad()));
                 })
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -200,19 +190,14 @@ public class ReporteService {
             resumen.setCantidadVentas(ventas.size());
 
             // Calcular total de comisiones por barbero
-            // Comisión = comision del producto * cantidad vendida
+            // Comisión = comision del producto * cantidad vendida (0 si el producto fue eliminado)
             BigDecimal totalComisiones = ventas.stream()
                     .map(venta -> {
-                        Integer comision = venta.getProducto().getComision();
-                        if (comision == null) {
-                            comision = 0;
+                        Integer comision = 0;
+                        if (venta.getProducto() != null) {
+                            comision = venta.getProducto().getComision();
+                            if (comision == null) comision = 0;
                         }
-                        // Debug: verificar comisión del producto
-                        System.out.println("DEBUG - Venta ID: " + venta.getId() + 
-                                ", Producto: " + venta.getProducto().getNombre() + 
-                                ", Comisión: " + comision + 
-                                ", Cantidad: " + venta.getCantidad());
-                        // Comisión = comision del producto * cantidad vendida
                         return BigDecimal.valueOf(comision).multiply(BigDecimal.valueOf(venta.getCantidad()));
                     })
                     .reduce(BigDecimal.ZERO, BigDecimal::add);

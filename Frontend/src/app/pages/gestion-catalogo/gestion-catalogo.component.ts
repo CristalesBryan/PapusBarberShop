@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { ProductoService } from '../../services/producto.service';
 import { S3Service } from '../../services/s3.service';
 import { Producto, ProductoCreate } from '../../models/producto.model';
+import { environment } from '../../../environments/environment';
 
 interface ProductoCatalogo extends Producto {
   descripcion?: string;
@@ -30,6 +31,14 @@ export class GestionCatalogoComponent implements OnInit {
   mostrarModalImagen = false;
   imagenModalUrl = '';
   productoModal: ProductoCatalogo | null = null;
+
+  // Modales dinámicos (confirmación y notificación)
+  mostrarModalConfirmacion = false;
+  mensajeConfirmacion = '';
+  accionConfirmacion: (() => void) | null = null;
+  mostrarModalNotificacion = false;
+  mensajeNotificacion = '';
+  tipoNotificacion: 'success' | 'error' | 'info' | 'warning' = 'info';
 
   productoForm: ProductoCatalogo = {
     id: 0,
@@ -77,8 +86,7 @@ export class GestionCatalogoComponent implements OnInit {
         }));
         this.cargando = false;
         
-        // Pre-cargar URLs presignadas para productos con imágenes en S3
-        this.preCargarUrlsPresignadas();
+        // Ya no necesitamos pre-cargar URLs presignadas porque usamos URLs públicas directas
       },
       error: (error) => {
         console.error('Error al cargar productos:', error);
@@ -109,39 +117,37 @@ export class GestionCatalogoComponent implements OnInit {
     // Verificar si hay una imagen guardada en localStorage
     const imagenesProductos = JSON.parse(localStorage.getItem('productoImagenes') || '{}');
     
-    // Si hay una imagen en S3 guardada, obtener URL presignada
+    // Si hay una imagen en S3 guardada, usar URL pública directa (igual que Vista-Clientes)
     if (imagenesProductos[producto.id]?.s3Key) {
       const s3Key = imagenesProductos[producto.id].s3Key;
       
-      // Verificar si tenemos una URL presignada válida en cache
-      const cachedPresigned = this.cachePresignedUrls.get(producto.id);
-      if (cachedPresigned && cachedPresigned.expiresAt > Date.now()) {
-        // La URL presignada aún es válida
-        this.cacheImagenes.set(producto.id, cachedPresigned.url);
-        return cachedPresigned.url;
+      // Construir URL pública directa del bucket público (no presignada)
+      const bucketName = environment.s3.bucketName || 'papusbarbershop';
+      const region = environment.s3.region || 'us-east-2';
+      const publicUrl = `https://${bucketName}.s3.${region}.amazonaws.com/${s3Key}`;
+      
+      // Cachear la URL pública
+      if (!this.cacheImagenes.has(producto.id)) {
+        this.cacheImagenes.set(producto.id, publicUrl);
       }
       
-      // Verificar si ya tenemos una URL en cache (puede ser la presignada que se obtuvo recientemente)
-      if (this.cacheImagenes.has(producto.id)) {
-        const cachedUrl = this.cacheImagenes.get(producto.id)!;
-        // Si la URL cacheada no es la temporal, usarla (probablemente es la presignada)
-        if (!cachedUrl.startsWith('data:image/svg+xml')) {
-          return cachedUrl;
+      return publicUrl;
+    }
+    
+    // Si el producto tiene imagenUrl del backend, extraer s3Key y construir URL pública
+    if (producto.imagenUrl) {
+      const s3Key = this.extractS3KeyFromUrl(producto.imagenUrl);
+      if (s3Key) {
+        const bucketName = environment.s3.bucketName || 'papusbarbershop';
+        const region = environment.s3.region || 'us-east-2';
+        const publicUrl = `https://${bucketName}.s3.${region}.amazonaws.com/${s3Key}`;
+        
+        if (!this.cacheImagenes.has(producto.id)) {
+          this.cacheImagenes.set(producto.id, publicUrl);
         }
+        
+        return publicUrl;
       }
-      
-      // Si no hay URL presignada válida y no hay una solicitud en curso, obtener una nueva de forma asíncrona
-      if (!this.solicitudesEnCurso.has(producto.id)) {
-        this.obtenerPresignedUrl(producto.id, s3Key);
-      }
-      
-      // Usar una URL temporal mientras se obtiene la presignada
-      const tempUrl = `data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgZmlsbD0iI2Y1ZjVmNSIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMTQiIGZpbGw9IiM5OTk5OTkiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGR5PSIuM2VtIj5DYXJnYW5kby4uLjwvdGV4dD48L3N2Zz4=`;
-      // Solo actualizar el cache si no hay una URL presignada válida ya guardada
-      if (!this.cacheImagenes.has(producto.id) || this.cacheImagenes.get(producto.id) === tempUrl) {
-        this.cacheImagenes.set(producto.id, tempUrl);
-      }
-      return this.cacheImagenes.get(producto.id) || tempUrl;
     }
     
     // Si ya tenemos una URL en cache para este producto y no hay S3, usarla
@@ -159,22 +165,66 @@ export class GestionCatalogoComponent implements OnInit {
       return url;
     }
     
-    // Si no hay imagen guardada, usar la misma lógica que en compra-aqui para consistencia
-    const nombre = producto.nombre.toLowerCase();
+    // Si no hay imagen guardada, usar placeholder
+    const placeholderUrl = `data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgZmlsbD0iI2Y1ZjVmNSIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMTQiIGZpbGw9IiM5OTk5OTkiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGR5PSIuM2VtIj5TaW4gaW1hZ2VuPC90ZXh0Pjwvc3ZnPg==`;
     
-    // Generar diferentes variaciones del nombre (igual que en compra-aqui)
-    const palabras = nombre.split(' ').filter(p => p.length > 0 && p !== 'para');
-    const camelCaseSinPara = palabras.length > 0 
-      ? palabras[0] + palabras.slice(1).map(p => p.charAt(0).toUpperCase() + p.slice(1)).join('')
-      : nombre.replace(/\s*para\s*/g, '');
+    if (!this.cacheImagenes.has(producto.id)) {
+      this.cacheImagenes.set(producto.id, placeholderUrl);
+    }
     
-    // Intentar primero con camelCase sin "para" (más común: ceraBarba)
-    const nombreSinEspacios = camelCaseSinPara || nombre.replace(/\s+/g, '');
+    return this.cacheImagenes.get(producto.id) || placeholderUrl;
+  }
+
+  /**
+   * Extrae el s3Key de una URL de S3 (presignada o pública).
+   * 
+   * Las URLs presignadas tienen el formato:
+   * https://bucket.s3.region.amazonaws.com/key?X-Amz-Algorithm=...
+   * 
+   * Las URLs públicas tienen el formato:
+   * https://bucket.s3.region.amazonaws.com/key
+   * 
+   * @param url URL de S3 (presignada o pública)
+   * @returns s3Key o null si no se puede extraer
+   */
+  private extractS3KeyFromUrl(url: string): string | null {
+    if (!url) return null;
     
-    // URL sin timestamp dinámico para evitar cambios constantes
-    const url = `/assets/images/Productos/${nombreSinEspacios}.jpg`;
-    this.cacheImagenes.set(producto.id, url);
-    return url;
+    try {
+      // Si la URL ya es un s3Key (sin dominio), retornarla tal cual
+      if (!url.includes('http') && !url.includes('://') && !url.includes('?')) {
+        return url;
+      }
+      
+      // Parsear la URL
+      const urlObj = new URL(url);
+      
+      // El s3Key está en el pathname, después del primer /
+      // Ejemplo: /productos/imagen.jpg -> productos/imagen.jpg
+      let s3Key = urlObj.pathname;
+      
+      // Remover el primer / si existe
+      if (s3Key.startsWith('/')) {
+        s3Key = s3Key.substring(1);
+      }
+      
+      // Decodificar caracteres especiales
+      s3Key = decodeURIComponent(s3Key);
+      
+      // Si el s3Key está vacío, intentar extraerlo de otra forma
+      if (!s3Key || s3Key.trim() === '') {
+        // Intentar con regex para URLs de S3
+        const match = url.match(/s3[.-][^/]+\.amazonaws\.com\/(.+?)(?:\?|$)/);
+        if (match && match[1]) {
+          s3Key = decodeURIComponent(match[1]);
+        }
+      }
+      
+      return s3Key && s3Key.trim() !== '' ? s3Key : null;
+    } catch (error) {
+      console.error('Error al extraer s3Key de URL:', url, error);
+      return null;
+    }
   }
 
   private obtenerPresignedUrl(productoId: number, s3Key: string): void {
@@ -260,20 +310,12 @@ export class GestionCatalogoComponent implements OnInit {
     // Cargar imagen guardada si existe (solo lectura para imágenes locales antiguas)
     const imagenesProductos = JSON.parse(localStorage.getItem('productoImagenes') || '{}');
     if (imagenesProductos[producto.id]?.s3Key) {
-      // Si hay imagen en S3, usar URL presignada
+      // Si hay imagen en S3, usar URL pública directa
       const s3Key = imagenesProductos[producto.id].s3Key;
-      // Verificar si tenemos una URL presignada válida en cache
-      const cachedPresigned = this.cachePresignedUrls.get(producto.id);
-      if (cachedPresigned && cachedPresigned.expiresAt > Date.now()) {
-        this.vistaPreviaImagen = cachedPresigned.url;
-      } else {
-        // Obtener URL presignada para la vista previa
-        if (!this.solicitudesEnCurso.has(producto.id)) {
-          this.obtenerPresignedUrl(producto.id, s3Key);
-        }
-        // Usar URL temporal mientras se obtiene la presignada
-        this.vistaPreviaImagen = `data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgZmlsbD0iI2Y1ZjVmNSIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMTQiIGZpbGw9IiM5OTk5OTkiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGR5PSIuM2VtIj5DYXJnYW5kby4uLjwvdGV4dD48L3N2Zz4=`;
-      }
+      const bucketName = environment.s3.bucketName || 'papusbarbershop';
+      const region = environment.s3.region || 'us-east-2';
+      const publicUrl = `https://${bucketName}.s3.${region}.amazonaws.com/${s3Key}`;
+      this.vistaPreviaImagen = publicUrl;
       this.nombreImagenSeleccionada = null;
       this.imagenSeleccionada = null;
     } else if (imagenesProductos[producto.id]?.nombreArchivo) {
@@ -313,7 +355,7 @@ export class GestionCatalogoComponent implements OnInit {
   guardar(): void {
     // Validar que haya una imagen seleccionada para productos nuevos
     if (!this.productoEditando && !this.imagenSeleccionada) {
-      alert('Por favor, selecciona una imagen para el producto. Las imágenes deben subirse a S3.');
+      this.mostrarNotificacion('Por favor, selecciona una imagen para el producto. Las imágenes deben subirse a S3.', 'warning');
       return;
     }
 
@@ -322,10 +364,9 @@ export class GestionCatalogoComponent implements OnInit {
       const imagenesProductos = JSON.parse(localStorage.getItem('productoImagenes') || '{}');
       const tieneImagenLocal = imagenesProductos[this.productoEditando.id]?.nombreArchivo;
       const tieneImagenS3 = imagenesProductos[this.productoEditando.id]?.s3Key;
-      
-      // Si tiene imagen local pero no S3, y no hay nueva imagen seleccionada, requerir subir a S3
+
       if (tieneImagenLocal && !tieneImagenS3 && !this.imagenSeleccionada) {
-        alert('Este producto tiene una imagen local. Por favor, selecciona una nueva imagen para subirla a S3.');
+        this.mostrarNotificacion('Este producto tiene una imagen local. Por favor, selecciona una nueva imagen para subirla a S3.', 'warning');
         return;
       }
     }
@@ -371,7 +412,7 @@ export class GestionCatalogoComponent implements OnInit {
                 },
                 error: (error) => {
                   console.error('Error al actualizar producto:', error);
-                  alert('Error al actualizar el producto');
+                  this.mostrarNotificacion('Error al actualizar el producto', 'error');
                 }
               });
             } else {
@@ -383,7 +424,7 @@ export class GestionCatalogoComponent implements OnInit {
                 },
                 error: (error) => {
                   console.error('Error al crear producto:', error);
-                  alert('Error al crear el producto');
+                  this.mostrarNotificacion('Error al crear el producto', 'error');
                 }
               });
             }
@@ -391,7 +432,7 @@ export class GestionCatalogoComponent implements OnInit {
         },
         error: (error) => {
           console.error('Error al subir imagen a S3:', error);
-          alert('Error al subir la imagen a S3. Por favor, intente nuevamente.');
+          this.mostrarNotificacion('Error al subir la imagen a S3. Por favor, intente nuevamente.', 'error');
         }
       });
     } else if (this.productoEditando) {
@@ -405,12 +446,12 @@ export class GestionCatalogoComponent implements OnInit {
           },
           error: (error) => {
             console.error('Error al actualizar producto:', error);
-            alert('Error al actualizar el producto');
+            this.mostrarNotificacion('Error al actualizar el producto', 'error');
           }
         });
       } else {
         // No tiene imagen S3, requerir subir una
-        alert('Por favor, selecciona una imagen para subir a S3.');
+        this.mostrarNotificacion('Por favor, selecciona una imagen para subir a S3.', 'warning');
       }
     }
   }
@@ -418,15 +459,12 @@ export class GestionCatalogoComponent implements OnInit {
   onFileSelected(event: any): void {
     const file = event.target.files[0];
     if (file) {
-      // Validar que sea una imagen
       if (!this.s3Service.isValidImage(file)) {
-        alert('Por favor, selecciona un archivo de imagen válido (JPG, JPEG, PNG, GIF, WEBP)');
+        this.mostrarNotificacion('Por favor, selecciona un archivo de imagen válido (JPG, JPEG, PNG, GIF, WEBP)', 'warning');
         return;
       }
-
-      // Validar tamaño del archivo (máximo 5MB)
       if (!this.s3Service.isValidFileSize(file, 5)) {
-        alert('El archivo es demasiado grande. El tamaño máximo es 5MB.');
+        this.mostrarNotificacion('El archivo es demasiado grande. El tamaño máximo es 5MB.', 'warning');
         return;
       }
 
@@ -532,25 +570,24 @@ export class GestionCatalogoComponent implements OnInit {
 
 
   eliminar(producto: ProductoCatalogo): void {
-    if (confirm(`¿Está seguro de que desea eliminar el producto "${producto.nombre}"?`)) {
+    this.mensajeConfirmacion = `¿Está seguro de que desea eliminar el producto "${producto.nombre}"?`;
+    this.accionConfirmacion = () => {
       this.productoService.delete(producto.id).subscribe({
         next: () => {
-          // Eliminar descripción del localStorage
           const descripciones = JSON.parse(localStorage.getItem('productoDescripciones') || '{}');
           delete descripciones[producto.id];
           localStorage.setItem('productoDescripciones', JSON.stringify(descripciones));
-          
           this.cargarProductos();
-          alert('Producto eliminado exitosamente');
-          // Disparar evento para actualizar otras vistas
+          this.mostrarNotificacion('Producto eliminado exitosamente', 'success');
           window.dispatchEvent(new Event('productoActualizado'));
         },
         error: (error) => {
           console.error('Error al eliminar producto:', error);
-          alert(error.error?.message || 'Error al eliminar el producto');
+          this.mostrarNotificacion(error.error?.message || 'Error al eliminar el producto', 'error');
         }
       });
-    }
+    };
+    this.mostrarModalConfirmacion = true;
   }
 
   onImageError(event: Event, producto?: ProductoCatalogo): void {
@@ -670,6 +707,28 @@ export class GestionCatalogoComponent implements OnInit {
         img.parentElement.innerHTML = '<div class="modal-imagen-placeholder"><i class="fas fa-image fa-5x"></i><p>Imagen no disponible</p></div>';
       }
     }
+  }
+
+  mostrarNotificacion(mensaje: string, tipo: 'success' | 'error' | 'info' | 'warning' = 'info'): void {
+    this.mensajeNotificacion = mensaje;
+    this.tipoNotificacion = tipo;
+    this.mostrarModalNotificacion = true;
+  }
+
+  cerrarModalNotificacion(): void {
+    this.mostrarModalNotificacion = false;
+    setTimeout(() => { this.mensajeNotificacion = ''; }, 300);
+  }
+
+  confirmarAccion(): void {
+    if (this.accionConfirmacion) this.accionConfirmacion();
+    this.cerrarModalConfirmacion();
+  }
+
+  cerrarModalConfirmacion(): void {
+    this.mostrarModalConfirmacion = false;
+    this.mensajeConfirmacion = '';
+    this.accionConfirmacion = null;
   }
 }
 

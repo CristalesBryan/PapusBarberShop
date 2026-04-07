@@ -27,7 +27,7 @@ export const routes: Routes = [
     path: 'servicios',
     loadComponent: () => import('./pages/servicios/servicios.component').then(m => m.ServiciosComponent),
     canActivate: [AuthGuard, RoleGuard],
-    data: { roles: ['ADMIN', 'BARBERO'] }
+    data: { roles: ['ADMIN', 'BARBERO', 'CESIA'] }
   },
   {
     path: 'productos',
@@ -39,7 +39,7 @@ export const routes: Routes = [
     path: 'ventas',
     loadComponent: () => import('./pages/ventas/ventas.component').then(m => m.VentasComponent),
     canActivate: [AuthGuard, RoleGuard],
-    data: { roles: ['ADMIN', 'BARBERO'] }
+    data: { roles: ['ADMIN', 'BARBERO', 'CESIA'] }
   },
   {
     path: 'reportes',
@@ -74,23 +74,26 @@ export const routes: Routes = [
   {
     path: 'compra-aqui',
     loadComponent: () => import('./pages/compra-aqui/compra-aqui.component').then(m => m.CompraAquiComponent),
-    canActivate: [AuthGuard]
+    canActivate: [AuthGuard, RoleGuard],
+    data: { roles: ['ADMIN', 'CESIA'] }
   },
   {
     path: 'acerca-de-nosotros',
     loadComponent: () => import('./pages/acerca-de-nosotros/acerca-de-nosotros.component').then(m => m.AcercaDeNosotrosComponent),
-    canActivate: [AuthGuard]
+    canActivate: [AuthGuard, RoleGuard],
+    data: { roles: ['ADMIN', 'BARBERO'] }
   },
   {
     path: 'academia',
     loadComponent: () => import('./pages/academia/academia.component').then(m => m.AcademiaComponent),
-    canActivate: [AuthGuard]
+    canActivate: [AuthGuard, RoleGuard],
+    data: { roles: ['ADMIN', 'BARBERO'] }
   },
   {
     path: 'gestion-catalogo',
     loadComponent: () => import('./pages/gestion-catalogo/gestion-catalogo.component').then(m => m.GestionCatalogoComponent),
     canActivate: [AuthGuard, RoleGuard],
-    data: { roles: ['ADMIN'] }
+    data: { roles: ['ADMIN', 'CESIA'] }
   },
   { path: '', redirectTo: '/login', pathMatch: 'full' },
   { path: '**', redirectTo: '/login' }

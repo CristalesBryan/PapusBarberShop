@@ -5,6 +5,8 @@ import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.List;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
 /**
  * DTO para crear una nueva cita.
  */
@@ -39,6 +41,13 @@ public class CitaCreateDTO {
     @NotEmpty(message = "Debe proporcionar al menos un correo para la confirmación")
     @Size(min = 1, max = 10, message = "Debe proporcionar entre 1 y 10 correos")
     private List<@Email(message = "Cada correo debe tener un formato válido") String> correosConfirmacion;
+
+    /**
+     * Zona horaria del usuario (ej. "America/Guatemala") para validar "hora actual" en su zona.
+     * Si no se envía, se usa "America/Guatemala" por defecto.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private String timezone;
 
     public CitaCreateDTO() {
     }
@@ -114,6 +123,14 @@ public class CitaCreateDTO {
 
     public void setCorreosConfirmacion(List<String> correosConfirmacion) {
         this.correosConfirmacion = correosConfirmacion;
+    }
+
+    public String getTimezone() {
+        return timezone;
+    }
+
+    public void setTimezone(String timezone) {
+        this.timezone = timezone;
     }
 }
 

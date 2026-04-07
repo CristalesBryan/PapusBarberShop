@@ -16,6 +16,7 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+import org.springframework.http.HttpMethod;
 
 import java.util.Arrays;
 
@@ -70,17 +71,27 @@ public class SecurityConfig {
                 
                 // Configurar reglas de autorización
                 .authorizeHttpRequests(auth -> auth
+                        // Permitir preflight OPTIONS en todas las rutas (necesario para CORS desde gestion.papusbarbershop.com)
+                        .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+                        
+                        // Permitir acceso público a endpoints de health check (Railway)
+                        .requestMatchers("/actuator/health").permitAll()
+                        
                         // Permitir acceso público a endpoints de autenticación
                         .requestMatchers("/auth/**").permitAll()
                         
                         // Permitir acceso público al endpoint temporal de reset de contraseña (SOLO DESARROLLO)
                         .requestMatchers("/admin/reset-admin-password").permitAll()
                         
+                        // Solo ADMIN puede cambiar su contraseña (autenticado)
+                        .requestMatchers("/admin/change-password").hasRole("ADMIN")
+                        
                         // Permitir acceso público a endpoints para vista de clientes (sin autenticación)
-                        .requestMatchers("/api/tipos-corte").permitAll() // GET para tipos de corte activos
-                        .requestMatchers("/barberos").permitAll() // GET para lista de barberos
-                        .requestMatchers("/productos").permitAll() // GET para lista de productos
-                        .requestMatchers("/api/citas/disponibilidad").permitAll() // GET para disponibilidad
+                        // IMPORTANTE: Las rutas más específicas deben ir ANTES de las generales
+                        .requestMatchers("/api/tipos-corte").permitAll() // GET para tipos de corte activos (público)
+                        .requestMatchers("/api/citas/disponibilidad/**").permitAll() // GET para disponibilidad con cualquier parámetro (público)
+                        .requestMatchers("/barberos").permitAll() // GET para lista de barberos (público para Vista-Clientes)
+                        .requestMatchers("/productos").permitAll() // GET para lista de productos (público)
                         .requestMatchers("/api/citas").permitAll() // POST para crear citas (vista pública)
                         
                         // Endpoints de S3 - URLs presignadas públicas, eliminación requiere autenticación
@@ -88,21 +99,19 @@ public class SecurityConfig {
                         .requestMatchers("/api/s3/exists").permitAll() // Verificación de existencia de archivos
                         .requestMatchers("/api/s3/producto-imagen/**").permitAll() // Referencias de imágenes de productos (público para sincronización)
                         .requestMatchers("/api/s3/producto-imagenes/**").permitAll() // Todas las referencias de imágenes (público para sincronización)
-                        .requestMatchers("/api/s3/delete").hasAnyRole("ADMIN", "BARBERO") // Eliminación requiere autenticación
                         
                         // Proteger endpoints según roles
-                        // ADMIN y BARBERO: Acceso a servicios y ventas
-                        .requestMatchers("/servicios/**").hasAnyRole("ADMIN", "BARBERO")
-                        .requestMatchers("/ventas-productos/**").hasAnyRole("ADMIN", "BARBERO")
-                        // Permitir lectura de barberos, tipos-corte y productos para BARBERO (necesario para formularios)
-                        // Las rutas específicas deben ir antes que las generales con **
-                        .requestMatchers("/barberos").hasAnyRole("ADMIN", "BARBERO") // GET para lista de barberos
-                        .requestMatchers("/tipos-corte").hasAnyRole("ADMIN", "BARBERO") // GET para lista de tipos de corte
-                        .requestMatchers("/productos").hasAnyRole("ADMIN", "BARBERO") // GET para lista de productos (necesario para ventas)
-                        // ADMIN: Acceso completo a todo lo demás
-                        .requestMatchers("/barberos/**").hasRole("ADMIN") // Otros métodos de barberos solo para ADMIN
-                        .requestMatchers("/tipos-corte/**").hasRole("ADMIN") // Otros métodos de tipos-corte solo para ADMIN
-                        .requestMatchers("/productos/**").hasRole("ADMIN") // Otros métodos de productos solo para ADMIN
+                        // ADMIN, BARBERO y CESIA: Acceso a servicios y ventas
+                        .requestMatchers("/servicios/**").hasAnyRole("ADMIN", "BARBERO", "CESIA")
+                        .requestMatchers("/ventas-productos/**").hasAnyRole("ADMIN", "BARBERO", "CESIA")
+                        
+                        // ADMIN y CESIA: Gestión de productos (y catálogo) y S3 para imágenes
+                        .requestMatchers("/productos/**").hasAnyRole("ADMIN", "CESIA")
+                        .requestMatchers("/api/s3/delete").hasAnyRole("ADMIN", "BARBERO", "CESIA")
+                        
+                        // ADMIN: Acceso completo a operaciones CRUD restantes
+                        .requestMatchers("/barberos/**").hasRole("ADMIN")
+                        .requestMatchers("/tipos-corte/**").hasRole("ADMIN")
                         .requestMatchers("/horarios/**").hasRole("ADMIN")
                         .requestMatchers("/citas/**").hasRole("ADMIN")
                         .requestMatchers("/mobiliario-equipo/**").hasRole("ADMIN")
@@ -131,19 +140,22 @@ public class SecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
         
-        // Permitir cualquier origen (usar patrones específicos en producción)
-        configuration.setAllowedOriginPatterns(Arrays.asList("*"));
+        // Orígenes permitidos: producción (gestion y www), Railway, y desarrollo local
+        configuration.setAllowedOriginPatterns(Arrays.asList(
+            "https://gestion.papusbarbershop.com",
+            "https://www.papusbarbershop.com",
+            "https://papusbarbershop.com",
+            "https://*.up.railway.app",
+            "http://localhost:4200",
+            "http://localhost:3000",
+            "http://localhost:5173"
+        ));
         
-        // Permitir métodos HTTP estándar
-        configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS"));
-        
-        // Permitir cualquier header
+        configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
         configuration.setAllowedHeaders(Arrays.asList("*"));
-        
-        // Permitir credenciales en las peticiones
         configuration.setAllowCredentials(true);
-
-        // Registrar la configuración para todas las rutas
+        configuration.setExposedHeaders(Arrays.asList("Authorization"));
+        
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);
         return source;

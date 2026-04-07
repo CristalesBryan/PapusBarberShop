@@ -38,10 +38,20 @@ public class VentaProducto {
     @JoinColumn(name = "barbero_id", nullable = false)
     private Barbero barbero;
 
-    @NotNull(message = "El producto es obligatorio")
+    /**
+     * Producto vendido. Puede ser null si el producto fue eliminado del catálogo
+     * pero se conserva el registro de la venta (el nombre se guarda en productoNombre).
+     */
     @ManyToOne(fetch = FetchType.EAGER)
-    @JoinColumn(name = "producto_id", nullable = false)
+    @JoinColumn(name = "producto_id", nullable = true)
     private Producto producto;
+
+    /**
+     * Nombre del producto en el momento de la venta. Se usa cuando el producto
+     * fue eliminado del catálogo (producto=null) para conservar el historial.
+     */
+    @Column(name = "producto_nombre", nullable = true, length = 200)
+    private String productoNombre;
 
     @NotNull(message = "La cantidad es obligatoria")
     @Min(value = 1, message = "La cantidad debe ser mayor a 0")
@@ -130,6 +140,14 @@ public class VentaProducto {
 
     public void setProducto(Producto producto) {
         this.producto = producto;
+    }
+
+    public String getProductoNombre() {
+        return productoNombre;
+    }
+
+    public void setProductoNombre(String productoNombre) {
+        this.productoNombre = productoNombre;
     }
 
     public Integer getCantidad() {

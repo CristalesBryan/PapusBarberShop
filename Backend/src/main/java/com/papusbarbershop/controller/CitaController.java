@@ -70,10 +70,13 @@ public class CitaController {
 
     /**
      * Obtiene la disponibilidad de barberos para una fecha específica.
+     * @param timezone Zona horaria del usuario (ej. America/Guatemala). Opcional; por defecto America/Guatemala.
      */
     @GetMapping("/disponibilidad/{fecha}")
-    public ResponseEntity<List<DisponibilidadDTO>> obtenerDisponibilidad(@PathVariable LocalDate fecha) {
-        List<DisponibilidadDTO> disponibilidad = citaService.obtenerDisponibilidad(fecha);
+    public ResponseEntity<List<DisponibilidadDTO>> obtenerDisponibilidad(
+            @PathVariable LocalDate fecha,
+            @RequestParam(required = false) String timezone) {
+        List<DisponibilidadDTO> disponibilidad = citaService.obtenerDisponibilidad(fecha, timezone);
         return ResponseEntity.ok(disponibilidad);
     }
 

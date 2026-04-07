@@ -3,8 +3,8 @@
   "version": "0.0.0",
   "scripts": {
     "ng": "ng",
-    "start": "ng serve --open",
-    "build": "ng build",
+    "start": "node server.js",
+    "build": "ng build --configuration production",
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
     "serve-prod": "ng serve --configuration production",
@@ -30,6 +30,8 @@
     "@fortawesome/fontawesome-free": "^6.7.2",
     "bootstrap": "^5.3.2",
     "chart.js": "^4.5.1",
+    "express": "^4",
+    "http-proxy-middleware": "^3.0.5",
     "rxjs": "~7.8.0",
     "tslib": "^2.3.0",
     "zone.js": "~0.14.2"
@@ -48,4 +50,3 @@
     "typescript": "~5.2.2"
   }
 }
-

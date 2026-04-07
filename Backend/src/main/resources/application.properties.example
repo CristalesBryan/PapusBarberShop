@@ -56,24 +56,14 @@ spring.datasource.hikari.minimum-idle=5
 spring.datasource.hikari.idle-timeout=300000
 spring.datasource.hikari.pool-name=PapusBarberShopPool
 
-# ==================== CONFIGURACIÓN DE EMAIL ====================
-# Configuración de Spring Mail para Gmail
-# IMPORTANTE: Si tienes 2FA activado, debes usar una "Contraseña de aplicación" 
-# en lugar de tu contraseña normal. Obtén una en: 
-# https://myaccount.google.com/apppasswords
-spring.mail.host=smtp.gmail.com
-spring.mail.port=587
-spring.mail.username=TU_EMAIL_AQUI@gmail.com
-spring.mail.password=TU_CONTRASEÑA_DE_APLICACION_AQUI
-spring.mail.properties.mail.smtp.auth=true
-spring.mail.properties.mail.smtp.starttls.enable=true
-spring.mail.properties.mail.smtp.starttls.required=true
-spring.mail.properties.mail.smtp.connectiontimeout=10000
-spring.mail.properties.mail.smtp.timeout=10000
-spring.mail.properties.mail.smtp.writetimeout=10000
-# Configuraciones adicionales para Gmail
-spring.mail.properties.mail.smtp.ssl.trust=smtp.gmail.com
-spring.mail.properties.mail.smtp.ssl.protocols=TLSv1.2
+# ==================== CONFIGURACIÓN DE EMAIL (Resend) ====================
+# Resend para envío de correos (https://resend.com)
+# - RESEND_API_KEY: API Key de Resend
+# - RESEND_FROM_EMAIL: Remitente (ej: Citas Papus BarberShop <citas@papusbarbershop.com>)
+# - RESEND_ADMIN_EMAIL: Email del admin para notificaciones de nuevas citas
+resend.api-key=${RESEND_API_KEY:}
+resend.from.email=${RESEND_FROM_EMAIL:Citas Papus BarberShop <citas@papusbarbershop.com>}
+resend.admin.email=${RESEND_ADMIN_EMAIL:}
 
 # ==================== CONFIGURACIÓN DE AMAZON S3 ====================
 # Configuración de AWS S3 para almacenamiento de imágenes

@@ -5,6 +5,7 @@ import com.papusbarbershop.dto.ProductoDTO;
 import com.papusbarbershop.entity.Producto;
 import com.papusbarbershop.exception.RecursoNoEncontradoException;
 import com.papusbarbershop.repository.ProductoRepository;
+import com.papusbarbershop.repository.VentaProductoRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -22,6 +23,9 @@ public class ProductoService {
 
     @Autowired
     private ProductoRepository productoRepository;
+
+    @Autowired
+    private VentaProductoRepository ventaProductoRepository;
 
     @Autowired
     private S3Service s3Service;
@@ -130,7 +134,9 @@ public class ProductoService {
 
     /**
      * Elimina un producto por su ID.
-     * 
+     * Las ventas que referencian al producto se conservan: se desvincula el producto
+     * y se guarda el nombre del producto en cada venta para mantener el historial.
+     *
      * @param id ID del producto a eliminar
      * @throws RecursoNoEncontradoException si no se encuentra el producto
      */
@@ -138,6 +144,13 @@ public class ProductoService {
     public void delete(Long id) {
         Producto producto = productoRepository.findById(id)
                 .orElseThrow(() -> new RecursoNoEncontradoException("Producto con ID " + id + " no encontrado"));
+        String nombreProducto = producto.getNombre();
+        List<com.papusbarbershop.entity.VentaProducto> ventas = ventaProductoRepository.findByProducto_Id(id);
+        for (com.papusbarbershop.entity.VentaProducto venta : ventas) {
+            venta.setProducto(null);
+            venta.setProductoNombre(nombreProducto);
+            ventaProductoRepository.save(venta);
+        }
         productoRepository.delete(producto);
     }
 

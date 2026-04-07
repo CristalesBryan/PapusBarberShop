@@ -72,6 +72,7 @@ public class VentaProductoService {
         venta.setHora(ventaCreateDTO.getHora());
         venta.setBarbero(barbero);
         venta.setProducto(producto);
+        venta.setProductoNombre(producto.getNombre());
         venta.setCantidad(ventaCreateDTO.getCantidad());
         venta.setPrecioUnitario(precioUnitario);
         venta.setImporte(importe);
@@ -140,16 +141,18 @@ public class VentaProductoService {
         Producto producto = productoService.findEntityById(ventaCreateDTO.getProductoId());
 
         // Si cambió el producto o la cantidad, ajustar stock
-        boolean productoCambio = !venta.getProducto().getId().equals(ventaCreateDTO.getProductoId());
+        boolean productoCambio = venta.getProducto() == null || !venta.getProducto().getId().equals(ventaCreateDTO.getProductoId());
         boolean cantidadCambio = !venta.getCantidad().equals(ventaCreateDTO.getCantidad());
 
         if (productoCambio || cantidadCambio) {
-            // Restaurar stock del producto anterior
-            Producto productoAnterior = venta.getProducto();
-            Integer stockActualAnterior = productoAnterior.getStock();
-            Integer stockRestaurado = stockActualAnterior + venta.getCantidad();
-            productoAnterior.setStock(stockRestaurado);
-            productoService.update(productoAnterior.getId(), convertProductoToDTO(productoAnterior));
+            // Restaurar stock del producto anterior (solo si la venta tenía producto vinculado)
+            if (venta.getProducto() != null) {
+                Producto productoAnterior = venta.getProducto();
+                Integer stockActualAnterior = productoAnterior.getStock();
+                Integer stockRestaurado = stockActualAnterior + venta.getCantidad();
+                productoAnterior.setStock(stockRestaurado);
+                productoService.update(productoAnterior.getId(), convertProductoToDTO(productoAnterior));
+            }
 
             // Validar stock disponible del nuevo producto (o mismo producto con nueva cantidad)
             Integer stockActual = producto.getStock();
@@ -192,6 +195,7 @@ public class VentaProductoService {
         venta.setHora(ventaCreateDTO.getHora());
         venta.setBarbero(barbero);
         venta.setProducto(producto);
+        venta.setProductoNombre(producto.getNombre());
         venta.setCantidad(ventaCreateDTO.getCantidad());
         venta.setPrecioUnitario(precioUnitario);
         venta.setImporte(importe);
@@ -212,14 +216,15 @@ public class VentaProductoService {
         VentaProducto venta = ventaProductoRepository.findById(id)
                 .orElseThrow(() -> new RecursoNoEncontradoException("Venta no encontrada con ID: " + id));
 
-        // Restaurar stock del producto
-        Producto producto = venta.getProducto();
-        Integer stockActual = producto.getStock();
-        Integer stockRestaurado = stockActual + venta.getCantidad();
-        producto.setStock(stockRestaurado);
-        productoService.update(producto.getId(), convertProductoToDTO(producto));
+        // Restaurar stock del producto solo si la venta aún tiene producto vinculado
+        if (venta.getProducto() != null) {
+            Producto producto = venta.getProducto();
+            Integer stockActual = producto.getStock();
+            Integer stockRestaurado = stockActual + venta.getCantidad();
+            producto.setStock(stockRestaurado);
+            productoService.update(producto.getId(), convertProductoToDTO(producto));
+        }
 
-        // Eliminar la venta
         ventaProductoRepository.deleteById(id);
     }
 
@@ -236,8 +241,8 @@ public class VentaProductoService {
         dto.setHora(venta.getHora());
         dto.setBarberoId(venta.getBarbero().getId());
         dto.setBarberoNombre(venta.getBarbero().getNombre());
-        dto.setProductoId(venta.getProducto().getId());
-        dto.setProductoNombre(venta.getProducto().getNombre());
+        dto.setProductoId(venta.getProducto() != null ? venta.getProducto().getId() : null);
+        dto.setProductoNombre(venta.getProducto() != null ? venta.getProducto().getNombre() : (venta.getProductoNombre() != null ? venta.getProductoNombre() : "Producto eliminado"));
         dto.setCantidad(venta.getCantidad());
         dto.setPrecioUnitario(venta.getPrecioUnitario());
         dto.setImporte(venta.getImporte());

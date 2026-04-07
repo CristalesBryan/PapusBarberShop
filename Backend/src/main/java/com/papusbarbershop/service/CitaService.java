@@ -13,6 +13,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -25,6 +27,9 @@ import java.util.stream.Collectors;
 public class CitaService {
 
     private static final Logger logger = LoggerFactory.getLogger(CitaService.class);
+
+    /** Zona horaria por defecto (Guatemala) para validar "hora actual" cuando el cliente no envía timezone. */
+    private static final String DEFAULT_TIMEZONE = "America/Guatemala";
 
     @Autowired
     private CitaRepository citaRepository;
@@ -51,9 +56,11 @@ public class CitaService {
         // Validar que el tipo de corte existe
         TipoCorte tipoCorte = tipoCorteService.obtenerEntidadPorId(citaCreateDTO.getTipoCorteId());
 
-        // Validar disponibilidad del barbero
-        validarDisponibilidad(barbero, citaCreateDTO.getFecha(), citaCreateDTO.getHora(), 
-                             tipoCorte.getTiempoMinutos(), null);
+        // Validar disponibilidad del barbero (usando zona horaria del usuario, ej. Guatemala)
+        String tz = (citaCreateDTO.getTimezone() != null && !citaCreateDTO.getTimezone().isBlank())
+                ? citaCreateDTO.getTimezone().trim() : DEFAULT_TIMEZONE;
+        validarDisponibilidad(barbero, citaCreateDTO.getFecha(), citaCreateDTO.getHora(),
+                             tipoCorte.getTiempoMinutos(), null, tz);
 
         // Crear la cita
         Cita cita = new Cita();
@@ -75,26 +82,27 @@ public class CitaService {
         // la validación se hace en validarDisponibilidad() que excluye citas completadas/canceladas)
         Cita citaGuardada = citaRepository.save(cita);
 
-        // Enviar correos de confirmación de forma ASÍNCRONA (no bloquea la respuesta)
+        // Enviar 3 correos de forma ASÍNCRONA: cliente, barbero y admin
         DateTimeFormatter fechaFormatter = DateTimeFormatter.ofPattern("dd/MM/yyyy");
         DateTimeFormatter horaFormatter = DateTimeFormatter.ofPattern("HH:mm");
         
-        logger.info("Preparando envío ASÍNCRONO de correos de confirmación para cita. Correos: {}", 
+        logger.info("Preparando envío ASÍNCRONO de correos (cliente, barbero, admin). Correos cliente: {}", 
                 citaCreateDTO.getCorreosConfirmacion());
         
-        // El envío se ejecuta en segundo plano - NO bloquea la respuesta
         emailAsyncService.enviarConfirmacionCitaAsync(
                 citaCreateDTO.getCorreosConfirmacion(),
                 citaCreateDTO.getNombreCliente(),
+                citaCreateDTO.getCorreoCliente(),
+                citaCreateDTO.getTelefonoCliente(),
                 citaCreateDTO.getFecha().format(fechaFormatter),
                 citaCreateDTO.getHora().format(horaFormatter),
                 barbero.getNombre(),
+                barbero.getCorreo(),
                 tipoCorte.getNombre(),
                 citaCreateDTO.getComentarios()
         );
         
-        // La respuesta se envía inmediatamente, el correo se enviará en segundo plano
-        logger.info("Tarea de envío de correo enviada al pool asíncrono. La respuesta se enviará inmediatamente.");
+        logger.info("Tarea de envío de correos enviada al pool asíncrono.");
 
         return convertirADTO(citaGuardada);
     }
@@ -102,11 +110,14 @@ public class CitaService {
     /**
      * Valida la disponibilidad de un barbero en una fecha y hora específica.
      * NO permite usar horarios de fechas pasadas - solo horarios de la fecha solicitada o futuros.
+     * Usa la zona horaria del usuario (ej. America/Guatemala) para comparar "hoy" y "hora actual".
      */
-    private void validarDisponibilidad(Barbero barbero, LocalDate fecha, LocalTime hora, 
-                                      Integer tiempoCorte, Long citaIdExcluir) {
-        LocalDate fechaHoy = LocalDate.now();
-        LocalTime horaActual = LocalTime.now();
+    private void validarDisponibilidad(Barbero barbero, LocalDate fecha, LocalTime hora,
+                                      Integer tiempoCorte, Long citaIdExcluir, String timezone) {
+        ZoneId zone = toZoneId(timezone);
+        ZonedDateTime now = ZonedDateTime.now(zone);
+        LocalDate fechaHoy = now.toLocalDate();
+        LocalTime horaActual = now.toLocalTime();
         
         // Si la fecha solicitada es pasada, no permitir crear la cita
         if (fecha.isBefore(fechaHoy)) {
@@ -255,6 +266,18 @@ public class CitaService {
         }
     }
 
+    private static ZoneId toZoneId(String timezone) {
+        if (timezone == null || timezone.isBlank()) {
+            return ZoneId.of(DEFAULT_TIMEZONE);
+        }
+        try {
+            return ZoneId.of(timezone.trim());
+        } catch (Exception e) {
+            logger.warn("Zona horaria no válida '{}', usando {}: {}", timezone, DEFAULT_TIMEZONE, e.getMessage());
+            return ZoneId.of(DEFAULT_TIMEZONE);
+        }
+    }
+
     /**
      * Obtiene todas las citas.
      */
@@ -287,11 +310,15 @@ public class CitaService {
      * Obtiene la disponibilidad de barberos para una fecha específica.
      * Solo incluye barberos que tengan un horario configurado para esa fecha.
      * NO muestra horarios de fechas pasadas - solo horarios de la fecha solicitada o futuros.
+     * Usa la zona horaria del usuario (ej. America/Guatemala) para "hoy" y filtrar horas pasadas.
      */
-    public List<DisponibilidadDTO> obtenerDisponibilidad(LocalDate fecha) {
+    public List<DisponibilidadDTO> obtenerDisponibilidad(LocalDate fecha, String timezone) {
         List<Barbero> barberos = barberoService.findAllEntities();
         List<DisponibilidadDTO> disponibilidades = new ArrayList<>();
-        LocalDate fechaHoy = LocalDate.now();
+        ZoneId zone = toZoneId(timezone);
+        ZonedDateTime now = ZonedDateTime.now(zone);
+        LocalDate fechaHoy = now.toLocalDate();
+        LocalTime horaActualHoy = now.toLocalTime();
 
         // Si la fecha solicitada es pasada, no mostrar disponibilidad
         if (fecha.isBefore(fechaHoy)) {
@@ -387,6 +414,12 @@ public class CitaService {
                 // Generar horas disponibles considerando la duración de los cortes
                 List<LocalTime> horasDisponibles = generarHorasDisponibles(
                         horario.getHoraEntrada(), horario.getHoraSalida(), rangosOcupados);
+                // Si es hoy, excluir horas ya pasadas en la zona del usuario
+                if (fecha.equals(fechaHoy)) {
+                    horasDisponibles = horasDisponibles.stream()
+                            .filter(h -> h.isAfter(horaActualHoy) || h.equals(horaActualHoy))
+                            .collect(Collectors.toList());
+                }
                 disponibilidad.setHorasDisponibles(horasDisponibles);
                 
                 disponibilidades.add(disponibilidad);
@@ -491,13 +524,14 @@ public class CitaService {
             throw new ValidacionException("No se puede cambiar la hora de una cita completada");
         }
 
-        // Validar que la nueva hora no esté ocupada
+        // Validar que la nueva hora no esté ocupada (usando zona por defecto Guatemala)
         validarDisponibilidad(
-            cita.getBarbero(), 
-            cita.getFecha(), 
-            nuevaHora, 
-            cita.getTipoCorte().getTiempoMinutos(), 
-            id // Excluir la cita actual de la validación
+            cita.getBarbero(),
+            cita.getFecha(),
+            nuevaHora,
+            cita.getTipoCorte().getTiempoMinutos(),
+            id,
+            DEFAULT_TIMEZONE
         );
 
         // Actualizar la hora
